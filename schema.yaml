@@ -1,0 +1,130 @@
+x-google-marketplace:
+  schemaVersion: v2
+  applicationApiVersion: v1beta1
+  # Must match the Application CRD's spec.descriptor.version and the image tags produced by
+  # build-images.sh.
+  publishedVersion: "1.0.0"
+  publishedVersionMetadata:
+    releaseNote: >-
+      Initial Google Cloud Marketplace release (BYOL). Free tier by default; an Enterprise
+      licence key issued by Consiva unlocks the paid modules for the contract term.
+  images:
+    # Google rewrites these at deploy time; the keys map to the image.* values the Helm chart
+    # consumes. '' (empty key) is the primary image, which Marketplace publishes at the image
+    # prefix itself with no name suffix — so the BACKEND is the primary image here, and the
+    # frontend is an additional image in its own folder beneath it.
+    #
+    # REPO_WITH_REGISTRY on both: chart/templates/deployment.yaml builds each container's image
+    # as "{{ repository }}:{{ tag }}", so the repository value has to carry the registry host.
+    # (REPO_WITHOUT_REGISTRY would yield a hostless reference that Kubernetes cannot pull.)
+    '':
+      properties:
+        image.backend.repository:
+          type: REPO_WITH_REGISTRY
+        image.backend.tag:
+          type: TAG
+    frontend:
+      properties:
+        image.frontend.repository:
+          type: REPO_WITH_REGISTRY
+        image.frontend.tag:
+          type: TAG
+
+properties:
+  name:
+    type: string
+    x-google-marketplace:
+      type: NAME
+  namespace:
+    type: string
+    x-google-marketplace:
+      type: NAMESPACE
+
+  appDomainUrl:
+    type: string
+    title: Application URL
+    description: >-
+      The full https:// URL this deployment will be reached at. Drives verification and
+      password-reset links, the dashboard's CORS allowlist, and the embed snippet you paste
+      into your own websites. If you do not have a hostname yet, deploy once, take the Ingress
+      address, then upgrade the release with this value set.
+    default: "http://localhost"
+
+  db.connectionString:
+    type: string
+    title: SQL Server connection string
+    description: >-
+      REQUIRED. This app does not ship a database — point it at Cloud SQL for SQL Server or
+      your own instance. Must include ;IPAddressPreference=IPv4First (works around a
+      Microsoft.Data.SqlClient fault resolving IPs on Linux containers). Example:
+      Server=10.0.0.5,1433;Database=CookieConsentDB;User Id=consiva;Password=...;TrustServerCertificate=True;Encrypt=True;IPAddressPreference=IPv4First;
+    x-google-marketplace:
+      type: STRING
+      sensitive: true
+
+  jwt.secret:
+    type: string
+    title: JWT signing secret
+    description: >-
+      REQUIRED. Signs this deployment's own session tokens. Use a unique, random value of at
+      least 32 characters; never reuse one across deployments.
+    x-google-marketplace:
+      type: STRING
+      sensitive: true
+
+  smtp.host:
+    type: string
+    title: SMTP host
+    description: >-
+      REQUIRED — the app will not start without working SMTP. Verification codes go to external
+      data principals exercising their DPDP rights, who have no way to recover from a silently
+      dropped message. Microsoft 365, Google Workspace and Amazon SES's SMTP interface all work.
+  smtp.port:
+    type: string
+    title: SMTP port
+    description: 587 for STARTTLS (usual), or 465 for implicit TLS.
+    default: "587"
+  smtp.username:
+    type: string
+    title: SMTP username
+    description: REQUIRED.
+  smtp.password:
+    type: string
+    title: SMTP password
+    description: REQUIRED. Stored in a Kubernetes Secret.
+    x-google-marketplace:
+      type: STRING
+      sensitive: true
+  smtp.fromEmail:
+    type: string
+    title: SMTP from address
+    description: REQUIRED. The address outbound mail is sent as.
+  smtp.fromName:
+    type: string
+    title: SMTP from name
+    description: The display name outbound mail is sent as.
+    default: "Consiva CMP"
+
+  enterpriseLicenseKey:
+    type: string
+    title: Enterprise license key
+    description: >-
+      OPTIONAL. Leave blank to run the Free tier. If you have agreed a BYOL contract with
+      Consiva, paste the signed key you were issued. It is verified offline inside your own
+      cluster — nothing is sent to Consiva or to Google. A blank, invalid or expired key never
+      blocks the deployment; it simply runs the Free tier and records the reason in the
+      backend's logs.
+    default: ""
+    x-google-marketplace:
+      type: STRING
+      sensitive: true
+
+required:
+  - name
+  - namespace
+  - db.connectionString
+  - jwt.secret
+  - smtp.host
+  - smtp.username
+  - smtp.password
+  - smtp.fromEmail

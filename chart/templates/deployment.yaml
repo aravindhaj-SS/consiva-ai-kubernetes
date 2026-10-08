@@ -1,0 +1,78 @@
+{{/*
+  Both containers in one Pod, mirroring the AWS ECS task definition: they share a network
+  namespace there, and co-locating them here keeps the same assumption true (the frontend's
+  baked-in NEXT_PUBLIC_API_URL="/" resolves against whatever origin served the page, and the
+  Ingress routes /api/* to the backend on the same host).
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.name }}
+    app.kubernetes.io/component: consiva-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.name }}
+      app.kubernetes.io/component: consiva-app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Values.name }}
+        app.kubernetes.io/component: consiva-app
+    spec:
+      containers:
+        - name: backend
+          image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http-api
+              containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: {{ .Values.name }}-config
+            - secretRef:
+                name: {{ .Values.name }}-secret
+          # /health is a plain 200 with no auth. Generous initial delay: the backend creates
+          # its own schema on an empty database and registers Hangfire jobs before it starts
+          # answering, which takes appreciably longer than a warm start.
+          readinessProbe:
+            httpGet: { path: /health, port: 5000 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /health, port: 5000 }
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+{{ toYaml .Values.resources.backend | indent 12 }}
+
+        - name: frontend
+          image: "{{ .Values.image.frontend.repository }}:{{ .Values.image.frontend.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http-web
+              containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: "production"
+          # NEXT_PUBLIC_API_URL is deliberately absent: Next.js inlines NEXT_PUBLIC_* into the
+          # client bundle at BUILD time, so setting it here would have no effect. It is baked
+          # into the image as "/" (an origin, not a path prefix — request paths already carry
+          # their own /api/v1/...).
+          #
+          # "/" returns a 307 to /login for an unauthenticated visitor, which is correct, so the
+          # probe accepts 3xx. A 200-only check would fail a perfectly healthy container — the
+          # same trap the AWS target group hit.
+          readinessProbe:
+            httpGet: { path: /, port: 3000 }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 30
+          resources:
+{{ toYaml .Values.resources.frontend | indent 12 }}

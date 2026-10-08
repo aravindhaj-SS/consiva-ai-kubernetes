@@ -1,0 +1,31 @@
+{{/*
+  Non-sensitive configuration. These are deployment topology and identity values, not
+  credentials, so they live in a ConfigMap where they stay readable for troubleshooting.
+
+  App__FrontendBaseUrl, CdnBaseUrl and Cors__AllowedOrigins__0 are deliberately the SAME value:
+  there is no separate CDN in this deployment model, so one origin serves the dashboard, the
+  API and /sdk.js. This mirrors the AWS CloudFormation template exactly.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.name }}-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.name }}
+    app.kubernetes.io/component: consiva-config
+data:
+  # Selects appsettings.SelfHosted.json, whose placeholder values make a missing environment
+  # variable fail loudly instead of silently falling back to a value in the base appsettings.
+  ASPNETCORE_ENVIRONMENT: "SelfHosted"
+  # The single flag every self-hosted behaviour is gated on. Identical on AWS and GCP — the
+  # application does not know or care which cloud it is running in.
+  DEPLOYMENT_MODE: "self-hosted"
+  App__FrontendBaseUrl: {{ .Values.appDomainUrl | quote }}
+  CdnBaseUrl: {{ .Values.appDomainUrl | quote }}
+  Cors__AllowedOrigins__0: {{ .Values.appDomainUrl | quote }}
+  Smtp__Host: {{ .Values.smtp.host | quote }}
+  Smtp__Port: {{ .Values.smtp.port | default "587" | quote }}
+  Smtp__Username: {{ .Values.smtp.username | quote }}
+  Smtp__FromEmail: {{ .Values.smtp.fromEmail | quote }}
+  Smtp__FromName: {{ .Values.smtp.fromName | default "Consiva CMP" | quote }}

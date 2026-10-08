@@ -1,0 +1,71 @@
+{{/*
+  Verification tester Pod, used only by `mpdev /scripts/verify`.
+
+  How this reaches the deployer: build-images.sh packages this directory into a SECOND
+  chart.tar.gz under /data-test/chart/. In test mode the base image extracts it and
+  overlay_test_files.py copies every file over the main extracted chart, so this template lands
+  beside the real templates and is rendered by the same `helm template` call with the same values.
+  The tarball must therefore be named chart.tar.gz and carry a top-level "chart" directory, exactly
+  like the production one — the overlay matches on relative path.
+
+  The annotation below is the whole contract: separate_tester_resources.py pulls every resource
+  annotated marketplace.cloud.google.com/verification=test out of the applied manifest and hands
+  it to run_tester.py, which applies it and waits for each POD to reach Succeeded or Failed.
+  Nothing else is treated as a test, and non-Pod kinds are skipped.
+
+  These are the same three checks as deploy/gcp/tests/basic-suite.yaml, which documents their
+  intent. That file is written for a `tester` image Google no longer publishes
+  (gcr.io/cloud-marketplace-tools/k8s/tester is 404), so the checks are run here directly instead.
+  KEEP THE TWO IN SYNC.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Values.name }}-tester
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.name }}
+    app.kubernetes.io/component: test
+  annotations:
+    marketplace.cloud.google.com/verification: test
+spec:
+  restartPolicy: Never
+  containers:
+    - name: tester
+      image: busybox:1.36
+      env:
+        - name: APP_INSTANCE_NAME
+          value: {{ .Values.name | quote }}
+        - name: NAMESPACE
+          value: {{ .Values.namespace | quote }}
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -e
+
+          status () {  # $1 = url
+            wget -q -S -O /dev/null "$1" 2>&1 | awk '/HTTP\//{print $2; exit}'
+          }
+
+          backend="http://${APP_INSTANCE_NAME}-backend.${NAMESPACE}.svc.cluster.local"
+          frontend="http://${APP_INSTANCE_NAME}-frontend.${NAMESPACE}.svc.cluster.local"
+
+          # backend-health-responds
+          code=$(status "${backend}/health")
+          echo "backend /health -> ${code}"
+          [ "$code" = "200" ]
+
+          # backend-api-reachable. An unauthenticated call to a real API route must be rejected by
+          # auth (401/403), not missing (404) — that distinguishes "app is up and routing" from
+          # "app is broken".
+          code=$(status "${backend}/api/v1/domains")
+          echo "backend /api/v1/domains -> ${code}"
+          [ "$code" = "401" ] || [ "$code" = "403" ]
+
+          # frontend-serves. "/" answers 307 to /login for an unauthenticated visitor, which is
+          # correct, so accept any non-5xx rather than insisting on 200.
+          code=$(status "${frontend}/")
+          echo "frontend / -> ${code}"
+          case "$code" in 5*) exit 1 ;; "") exit 1 ;; *) : ;; esac
+
+          echo "all checks passed"

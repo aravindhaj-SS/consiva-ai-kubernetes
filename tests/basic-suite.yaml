@@ -1,0 +1,36 @@
+# mpdev verification suite. Google runs this as a Tester Pod after install and before
+# uninstall; a non-zero exit fails verification.
+#
+# Kept deliberately thin: it proves the two containers are actually serving, not that the whole
+# product works. /health is the backend's own liveness endpoint (plain 200, no auth). The
+# frontend answers "/" with a 307 to /login for an unauthenticated visitor, which is correct
+# behaviour, so that check accepts any non-5xx rather than insisting on 200.
+actions:
+  - name: backend-health-responds
+    bashTest:
+      script: |
+        set -e
+        code=$(wget -q -S -O /dev/null "http://${APP_INSTANCE_NAME}-backend.${NAMESPACE}.svc.cluster.local/health" 2>&1 \
+               | awk '/HTTP\//{print $2; exit}')
+        echo "backend /health -> $code"
+        [ "$code" = "200" ]
+
+  - name: backend-api-reachable
+    bashTest:
+      script: |
+        set -e
+        # An unauthenticated call to a real API route must be rejected by auth (401/403), not
+        # missing (404) — that distinguishes "app is up and routing" from "app is broken".
+        code=$(wget -q -S -O /dev/null "http://${APP_INSTANCE_NAME}-backend.${NAMESPACE}.svc.cluster.local/api/v1/domains" 2>&1 \
+               | awk '/HTTP\//{print $2; exit}')
+        echo "backend /api/v1/domains -> $code"
+        [ "$code" = "401" ] || [ "$code" = "403" ]
+
+  - name: frontend-serves
+    bashTest:
+      script: |
+        set -e
+        code=$(wget -q -S -O /dev/null "http://${APP_INSTANCE_NAME}-frontend.${NAMESPACE}.svc.cluster.local/" 2>&1 \
+               | awk '/HTTP\//{print $2; exit}')
+        echo "frontend / -> $code"
+        case "$code" in 5*) exit 1 ;; "") exit 1 ;; *) exit 0 ;; esac

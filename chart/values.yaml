@@ -1,0 +1,62 @@
+# Image references. Google Cloud Marketplace rewrites these at deploy time via the
+# x-google-marketplace Container Images substitution declared in schema.yaml — the values here
+# are only defaults for local `helm template` / `helm install` runs.
+# The backend is the app's primary image, so it sits at the prefix itself with no name suffix;
+# the frontend is an additional image in its own folder. gcr.io/<project>/<path> is served by the
+# Artifact Registry repository named "gcr.io" in location "us" of the project.
+image:
+  backend:
+    repository: gcr.io/consiva-public/consiva-ai-kubernetes
+    tag: "1.0.0"
+  frontend:
+    repository: gcr.io/consiva-public/consiva-ai-kubernetes/frontend
+    tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+# Application resource instance name, supplied by the deployer.
+name: consiva
+namespace: default
+
+# The URL this deployment will be reached at. Drives verification/reset links, the dashboard's
+# CORS allowlist, and the SDK embed snippet handed to customer websites. Same value is used for
+# App__FrontendBaseUrl, CdnBaseUrl and Cors__AllowedOrigins__0 — there is no separate CDN in
+# this deployment model, one origin serves the dashboard, the API and /sdk.js.
+appDomainUrl: ""
+
+# SQL Server connection string. REQUIRED — this chart does not ship a database. Point it at
+# Cloud SQL for SQL Server or your own instance. Must include ;IPAddressPreference=IPv4First
+# (works around a Microsoft.Data.SqlClient fault resolving IPs on Linux containers).
+db:
+  connectionString: ""
+
+# JWT signing key for this deployment's own session tokens. Generate a unique value per
+# install; never reuse one across deployments.
+jwt:
+  secret: ""
+
+# Outbound mail. REQUIRED — the backend refuses to start without host/username/password/from,
+# because DSAR verification codes go to external data principals who have no way to recover
+# from a silently dropped message.
+smtp:
+  host: ""
+  port: "587"
+  username: ""
+  password: ""
+  fromEmail: ""
+  fromName: "Consiva CMP"
+
+# OPTIONAL. Blank = Free tier. A signed key issued by Consiva after a BYOL contract switches
+# this deployment to Enterprise until the key's exp date. Verified entirely offline.
+enterpriseLicenseKey: ""
+
+resources:
+  backend:
+    requests: { cpu: "500m", memory: "1Gi" }
+  frontend:
+    requests: { cpu: "250m", memory: "512Mi" }
+
+service:
+  type: ClusterIP
+ingress:
+  enabled: true
+  className: ""

@@ -1,0 +1,39 @@
+{{/*
+  Two Services so the Ingress can route by path to the right port. Both select the same Pod —
+  the split is about ports, not about scheduling.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.name }}-frontend
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.name }}
+    app.kubernetes.io/component: consiva-app
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app.kubernetes.io/name: {{ .Values.name }}
+    app.kubernetes.io/component: consiva-app
+  ports:
+    - name: http-web
+      port: 80
+      targetPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.name }}-backend
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.name }}
+    app.kubernetes.io/component: consiva-app
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app.kubernetes.io/name: {{ .Values.name }}
+    app.kubernetes.io/component: consiva-app
+  ports:
+    - name: http-api
+      port: 80
+      targetPort: 5000
