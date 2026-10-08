@@ -3,11 +3,13 @@ x-google-marketplace:
   applicationApiVersion: v1beta1
   # Must match the Application CRD's spec.descriptor.version and the image tags produced by
   # build-images.sh.
-  publishedVersion: "1.0.0"
+  publishedVersion: "1.0.1"
   publishedVersionMetadata:
     releaseNote: >-
       Initial Google Cloud Marketplace release (BYOL). Free tier by default; an Enterprise
       licence key issued by Consiva unlocks the paid modules for the contract term.
+      (1.0.1 corrects the deployer input schema: the four secret inputs are declared
+      MASKED_FIELD. No application change from 1.0.0.)
   images:
     # Google rewrites these at deploy time; the keys map to the image.* values the Helm chart
     # consumes. '' (empty key) is the primary image, which Marketplace publishes at the image
@@ -29,6 +31,17 @@ x-google-marketplace:
           type: REPO_WITH_REGISTRY
         image.frontend.tag:
           type: TAG
+
+# Masked inputs use `type: MASKED_FIELD`.
+#
+# NOT `type: STRING` with `sensitive: true`, which is what this file used to say. `sensitive` is
+# not a field in the v2 schema, and Producer Portal rejects the whole deployer because of it:
+#   Failed to parse schema from deployer ... Cannot find field: sensitive in message
+#   cloud.commerce.common.display.v1.XGoogleMarketplaceProperty
+# `STRING` was inert here too — it only does anything alongside a `string:` block declaring
+# generatedProperties. MASKED_FIELD masks the value in the deploy form (users get a reveal
+# option) and passes it through unchanged, so the Secret receives the same values under the same
+# names as before.
 
 properties:
   name:
@@ -59,8 +72,7 @@ properties:
       Microsoft.Data.SqlClient fault resolving IPs on Linux containers). Example:
       Server=10.0.0.5,1433;Database=CookieConsentDB;User Id=consiva;Password=...;TrustServerCertificate=True;Encrypt=True;IPAddressPreference=IPv4First;
     x-google-marketplace:
-      type: STRING
-      sensitive: true
+      type: MASKED_FIELD        # masked in the deploy form; see the note above "properties"
 
   jwt.secret:
     type: string
@@ -69,8 +81,7 @@ properties:
       REQUIRED. Signs this deployment's own session tokens. Use a unique, random value of at
       least 32 characters; never reuse one across deployments.
     x-google-marketplace:
-      type: STRING
-      sensitive: true
+      type: MASKED_FIELD        # masked in the deploy form; see the note above "properties"
 
   smtp.host:
     type: string
@@ -93,8 +104,7 @@ properties:
     title: SMTP password
     description: REQUIRED. Stored in a Kubernetes Secret.
     x-google-marketplace:
-      type: STRING
-      sensitive: true
+      type: MASKED_FIELD        # masked in the deploy form; see the note above "properties"
   smtp.fromEmail:
     type: string
     title: SMTP from address
@@ -116,8 +126,7 @@ properties:
       backend's logs.
     default: ""
     x-google-marketplace:
-      type: STRING
-      sensitive: true
+      type: MASKED_FIELD        # masked in the deploy form; see the note above "properties"
 
 required:
   - name

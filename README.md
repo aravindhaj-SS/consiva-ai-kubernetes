@@ -95,23 +95,51 @@ port-less alias such as `registry.kind.local`.
 
 ## Published images
 
-Pushed 2026-10-07 to `gcr.io/consiva-public/consiva-ai-kubernetes`. All six references carry
+Current release is **`1.0.1`** on track **`1.0`**, pushed 2026-10-08 to
+`gcr.io/consiva-public/consiva-ai-kubernetes`. All six references carry
 `com.googleapis.cloudmarketplace.product.service.name=services/consiva-ai-kubernetes.endpoints.consiva-public.cloud.goog`
-on the **remote** manifest, verified with `docker buildx imagetools inspect --raw`.
+on the **remote** manifest, each confirmed with `docker buildx imagetools inspect --raw`, and each
+tag resolves to a single OCI manifest rather than an index.
 
 | Image | Tags | Digest |
 |---|---|---|
-| `gcr.io/consiva-public/consiva-ai-kubernetes` (backend, **primary**) | `1.0`, `1.0.0` | `sha256:29802ee479033807f9116ea8e2a7395d1aa857879e4b2c1756d765b00d4cbcde` |
-| `…/consiva-ai-kubernetes/frontend` | `1.0`, `1.0.0` | `sha256:aabe31a36c0d0fe77db031118823ba650f6b15ef0eed36c7d282a6f5f8ee10e4` |
-| `…/consiva-ai-kubernetes/deployer` | `1.0`, `1.0.0` | `sha256:88b48a37f9a381f94d1f9d928c2fbaca27a9a9bf4d34d35338428c5c00e669b8` |
+| `gcr.io/consiva-public/consiva-ai-kubernetes` (backend, **primary**) | `1.0`, `1.0.1` | `sha256:da6c113185d6d78767a752466df79292af1eb938aef949c50211ed4982ef0820` |
+| `…/consiva-ai-kubernetes/frontend` | `1.0`, `1.0.1` | `sha256:b096d8de9fcea377915fe639637f2f64d9a8605d36a9bb7746c4757277f9e15a` |
+| `…/consiva-ai-kubernetes/deployer` | `1.0`, `1.0.1` | `sha256:80375b9a1739ab249122f4accf7f68e6ac3df2b259376465e78eab6e41bedc83` |
 
-**`1.0` and `1.0.0` are spent.** Tags are not overwritten; any rebuild needs `1.0.1`.
+The `1.0` track tag now points at the `1.0.1` digests, which is what Marketplace follows to pick
+up patch releases.
 
-Carrying *both* tags on the deployer is correct, not redundant. `building-deployer.md` states each
-image "**must** carry the primary track ID and the specific release version ID as its Docker tag",
-and its worked example shows the current deployer holding both (`1.4`, `1.4.34`). A line in
-`building-deployer-helm.md` saying "the deployer excludes the patch version in SemVer" contradicts
-that; the more specific page, which it links to for tag rules, wins.
+### Why 1.0.1 exists
+
+Producer Portal rejected the `1.0.0` deployer outright:
+
+```
+Failed to parse schema from deployer gcr.io/consiva-public/consiva-ai-kubernetes/deployer@sha256:88b48a37…
+Cannot find field: sensitive in message cloud.commerce.common.display.v1.XGoogleMarketplaceProperty
+```
+
+`sensitive: true` is **not** part of the v2 schema — the word appears nowhere in `schema.md`. The
+correct declaration for a masked input is `type: MASKED_FIELD`. The `type: STRING` it was paired
+with was inert as written: `STRING` only does anything alongside a `string:` block declaring
+`generatedProperties`, and there was none.
+
+The four secret inputs — `db.connectionString`, `jwt.secret`, `smtp.password` and
+`enterpriseLicenseKey` — are now `MASKED_FIELD`. **This does not change how values reach the
+chart.** `config_helper.py` treats `MASKED_FIELD` purely as a UI hint (it only asserts the
+property is a string); no transformation is applied, so the Secret template receives the same
+values under the same names. Verified by re-running mpdev install and verify after the change.
+
+**`1.0.0` and `1.0.1` are both spent**, as is the `1.0` tag's current position. Tags are never
+overwritten; the next rebuild needs `1.0.2`. The `1.0.0` images are still in the registry but its
+deployer is unusable — Producer Portal cannot parse its schema.
+
+Carrying *both* the track and version tag on the deployer is correct, not redundant.
+`building-deployer.md` states each image "**must** carry the primary track ID and the specific
+release version ID as its Docker tag", and its worked example shows the current deployer holding
+both (`1.4`, `1.4.34`). A line in `building-deployer-helm.md` saying "the deployer excludes the
+patch version in SemVer" contradicts that; the more specific page, which it links to for tag
+rules, wins.
 
 Deployer URL for Producer Portal, **no digest**:
 

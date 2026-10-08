@@ -41,7 +41,7 @@ SERVICE_NAME="${SERVICE_NAME:-consiva-ai-kubernetes.endpoints.consiva-public.clo
 # Under gcr.io the repository is "gcr.io" and the prefix below is an ordinary image path, so the
 # main image can exist exactly where Marketplace expects it.
 REGISTRY="${REGISTRY:-gcr.io/consiva-public/consiva-ai-kubernetes}"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.0.1}"
 TRACK="${TRACK:-1.0}"
 PUSH="${PUSH:-1}"
 
