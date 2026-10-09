@@ -7,10 +7,10 @@
 image:
   backend:
     repository: gcr.io/consiva-public/consiva-ai-kubernetes
-    tag: "1.0.4"
+    tag: "1.0.5"
   frontend:
     repository: gcr.io/consiva-public/consiva-ai-kubernetes/frontend
-    tag: "1.0.4"
+    tag: "1.0.5"
   pullPolicy: IfNotPresent
 
 # Application resource instance name, supplied by the deployer.
@@ -55,8 +55,12 @@ resources:
   frontend:
     requests: { cpu: "250m", memory: "512Mi" }
 
+# NodePort, not ClusterIP: the GKE Ingress controller rejects a ClusterIP backend outright
+# ("expected \"NodePort\" or \"LoadBalancer\" when not using NEGs"). NodePort is a superset of
+# ClusterIP — the cluster IP and in-cluster DNS are unchanged — so nothing else in the chart or on
+# a non-GKE ingress controller is affected. Overridable. See "GKE Ingress" in README.md.
 service:
-  type: ClusterIP
+  type: NodePort
 ingress:
   enabled: true
   className: ""

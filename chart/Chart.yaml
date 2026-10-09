@@ -4,5 +4,5 @@ description: Consiva.ai — DPDP cookie & consent management platform (self-host
 type: application
 # Chart version tracks the application release. Google requires the Application CRD's
 # spec.version and the image tags to agree; see deploy/gcp/build-images.sh.
-version: 1.0.4
-appVersion: "1.0.4"
+version: 1.0.5
+appVersion: "1.0.5"

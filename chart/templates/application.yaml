@@ -23,7 +23,7 @@ metadata:
 spec:
   descriptor:
     type: Consiva.ai
-    version: "1.0.4"
+    version: "1.0.5"
     description: >-
       DPDP-compliant cookie and consent management. Runs entirely inside your own cluster —
       consent records and data-principal requests never leave your infrastructure.

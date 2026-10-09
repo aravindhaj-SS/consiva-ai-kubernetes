@@ -10,6 +10,12 @@ metadata:
   labels:
     app.kubernetes.io/name: {{ .Values.name }}
     app.kubernetes.io/component: consiva-app
+  annotations:
+    # Asks GKE for container-native load balancing explicitly. GKE only auto-annotates this when
+    # the cluster is VPC-native, is not on a Shared VPC, does not use GKE Network Policy and has
+    # the HttpLoadBalancing add-on; Google's verification clusters fail at least one of those, so
+    # the annotation has to be stated. Ignored by every non-GKE ingress controller.
+    cloud.google.com/neg: '{"ingress": true}'
 spec:
   type: {{ .Values.service.type }}
   selector:
@@ -28,6 +34,12 @@ metadata:
   labels:
     app.kubernetes.io/name: {{ .Values.name }}
     app.kubernetes.io/component: consiva-app
+  annotations:
+    # Asks GKE for container-native load balancing explicitly. GKE only auto-annotates this when
+    # the cluster is VPC-native, is not on a Shared VPC, does not use GKE Network Policy and has
+    # the HttpLoadBalancing add-on; Google's verification clusters fail at least one of those, so
+    # the annotation has to be stated. Ignored by every non-GKE ingress controller.
+    cloud.google.com/neg: '{"ingress": true}'
 spec:
   type: {{ .Values.service.type }}
   selector:

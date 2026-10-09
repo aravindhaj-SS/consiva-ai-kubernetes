@@ -95,7 +95,7 @@ port-less alias such as `registry.kind.local`.
 
 ## Published images
 
-Current release is **`1.0.4`** on track **`1.0`**, pushed 2026-10-09 to
+Current release is **`1.0.5`** on track **`1.0`**, pushed 2026-10-09 to
 `gcr.io/consiva-public/consiva-ai-kubernetes`. All six references carry
 `com.googleapis.cloudmarketplace.product.service.name=services/consiva-ai-kubernetes.endpoints.consiva-public.cloud.goog`
 on the **remote** manifest, each confirmed with `docker buildx imagetools inspect --raw`, and each
@@ -103,25 +103,22 @@ tag resolves to a single OCI manifest rather than an index.
 
 | Image | Tags | Digest |
 |---|---|---|
-| `gcr.io/consiva-public/consiva-ai-kubernetes` (backend, **primary**) | `1.0`, `1.0.4` | `sha256:ad65da0fd63062965a3d0b458360dfb2df61f1f071d69122baa4f9a3ba21b4f1` |
-| `…/consiva-ai-kubernetes/frontend` | `1.0`, `1.0.4` | `sha256:8f3f1f011d5f413f55e348ee099a492b744e4a84b2c30ba0fb1e215e501759c7` |
-| `…/consiva-ai-kubernetes/deployer` | `1.0`, `1.0.4` | `sha256:957173079d2e5069df49fd0b56d622fe23c1f47efc449f34db1410fb6ff9f458` |
+| `gcr.io/consiva-public/consiva-ai-kubernetes` (backend, **primary**) | `1.0`, `1.0.5` | `sha256:fbc4f3a2760f7b3d3f05b239cbae94a2533e1074e372db53251e409c1685ea07` |
+| `…/consiva-ai-kubernetes/frontend` | `1.0`, `1.0.5` | `sha256:8f3f1f011d5f413f55e348ee099a492b744e4a84b2c30ba0fb1e215e501759c7` |
+| `…/consiva-ai-kubernetes/deployer` | `1.0`, `1.0.5` | `sha256:a2e19fe506d1fd9b8169d65b08af52f58f1aae73d1d5a12543602bc294641d34` |
 
-The frontend digest is unchanged from `1.0.2` — no frontend source changed, so the build is
-byte-identical and it simply carries extra tags. Backend and deployer are new.
+The frontend digest is unchanged since `1.0.2` — no frontend source has changed since.
 
-The `1.0` track tag points at the `1.0.4` digests, which is what Marketplace follows to pick up
-patch releases.
-
-**`1.0.0` through `1.0.4` are all spent.** Tags are never overwritten; the next rebuild needs
-`1.0.5`. Superseded images remain in the registry and should not be used:
+**`1.0.0` through `1.0.5` are all spent.** Tags are never overwritten; the next rebuild needs
+`1.0.6`. Superseded images remain in the registry and should not be used:
 
 | Version | Why superseded |
 |---|---|
 | `1.0.0` | deployer schema unparseable (`sensitive` is not a v2 field) |
 | `1.0.1` | frontend carries postcss CVE-2026-45623 |
 | `1.0.2` | crash-loops when no database is reachable |
-| `1.0.3` | starts without a database but **never converges** when one appears — its reachability probe cannot see a server that does not yet contain the app's database |
+| `1.0.3` | starts without a database but never converges when one appears |
+| `1.0.4` | ClusterIP Services rejected by GKE Ingress; backend could take longer than the readiness deadline to bind |
 
 ### Why 1.0.1 and 1.0.2 exist
 
@@ -265,6 +262,85 @@ Google's own documents describe two different layouts, and both are legal:
 the common prefix of the images." The "if" makes a primary image optional, and the tooling agrees
 — `config_helper.py` reads it with `dictionary.get(...)`. Either shape is accepted, and mpdev
 install + verify both pass against this one.
+
+## Binding before database work
+
+GKE validation rejected `1.0.4` with:
+
+```
+Readiness probe failed: dial tcp …:5000: connect: connection refused
+ERROR Application did not get ready before timeout of 300.0 seconds
+```
+
+Connection *refused*, not a timeout — nothing was listening. `ASPNETCORE_URLS=http://+:5000` was
+already set correctly in the backend Dockerfile, so this was not a misconfigured port: the process
+simply had not reached Kestrel yet.
+
+Everything that runs before the listener opens touches SQL Server — the schema check, the
+`DistributedCache` table, Hangfire's storage. Each defaults to a 15-second connect timeout, and
+both SqlClient and EF retry on top of that, so against an address with nothing behind it those
+calls can hold startup for minutes. That is precisely the configuration Google verifies with,
+because the schema's placeholder default points at `127.0.0.1`.
+
+Three changes in `1.0.5`:
+
+1. **Bind first.** `app.StartAsync()` now runs *before* any database work, then the database work
+   runs, then `app.WaitForShutdownAsync()`. A probe gets a reply instead of a refused connection.
+2. **Cap every startup connection.** `ConnectionStringTimeout.Cap(..., 5)` is applied to the
+   schema check, the `DistributedCache` statement, Hangfire's storage, and the reachability probe.
+3. **Drop EF's retry** on the schema check — it already tolerates failure, so retrying a dead
+   address only delayed binding.
+
+Measured under Google's exact conditions (schema defaults, no SQL Server anywhere):
+**`/health` answers in 28 seconds.**
+
+A consequence worth stating: with a reachable database the listener is now open during the few
+seconds the seeds take, where previously the container accepted no connections at all. `/health`
+answers 200 in that window; **`/health/ready` does not**, and it is the signal that gates real
+traffic.
+
+That test also exposed a flaw in the earlier work: the bootstrap state started *ready*, so for a
+few seconds `/health` reported `"healthy"` and `/health/ready` returned 200 on a deployment that
+had not yet checked whether it had a database. It now starts **pending** — `"degraded"` with
+`"Startup bootstrap has not finished yet"` and a 503 — and resolves only once the probe answers.
+
+## GKE Ingress: NodePort **and** the NEG annotation
+
+GKE validation rejected `1.0.4` on all three tested versions (1.35.6, 1.35.8, 1.36.4):
+
+```
+Translation failed: invalid ingress spec: service "…-backend" is type "ClusterIP",
+expected "NodePort" or "LoadBalancer" when not using NEGs
+```
+
+Both Services are now `NodePort` **and** carry `cloud.google.com/neg: '{"ingress": true}'`. Both
+are needed, and the reason is in Google's own documentation
+([GKE Ingress for Application Load Balancers](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/ingress)):
+
+> For clusters where NEGs are not the default, it is still strongly recommended to use
+> container-native load balancing, but it must be enabled explicitly on a per-Service basis.
+
+GKE auto-enables container-native load balancing — and auto-adds that annotation — only when the
+cluster is VPC-native, is not on a Shared VPC network, does not use GKE Network Policy, and has the
+HttpLoadBalancing add-on enabled. The failure proves Google's verification clusters fail at least
+one of those, so the annotation has to be stated rather than assumed.
+
+The annotation alone is not enough either:
+
+> If you use routes-based clusters with external Ingress, the GKE Ingress controller cannot use
+> container-native load balancing using GCE_VM_IP_PORT NEGs. Instead, the Ingress controller uses
+> unmanaged instance group backends that include all nodes in all node pools.
+
+Instance group backends require `NodePort`. Nothing in the error says which case these clusters
+are in, so the chart covers both: GKE uses NEGs where it can and instance groups where it cannot,
+which is how GKE behaves natively — a Service may be `NodePort` and carry a NEG annotation at the
+same time.
+
+Nothing else is affected. `NodePort` is a superset of `ClusterIP`, so the cluster IP and in-cluster
+DNS are unchanged, the apptest suite still resolves the Services by name, and non-GKE ingress
+controllers are unaffected (they ignore the annotation). `service.type` remains a chart value, so a
+customer can override it. The cost is a port in 30000–32767 on every node per Service; on GKE those
+are not externally reachable without a firewall rule.
 
 ## Ingress: no host rule, deliberately
 

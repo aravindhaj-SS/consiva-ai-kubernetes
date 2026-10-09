@@ -3,7 +3,7 @@ x-google-marketplace:
   applicationApiVersion: v1beta1
   # Must match the Application CRD's spec.descriptor.version and the image tags produced by
   # build-images.sh.
-  publishedVersion: "1.0.4"
+  publishedVersion: "1.0.5"
   publishedVersionMetadata:
     releaseNote: >-
       Initial Google Cloud Marketplace release (BYOL). Free tier by default; an Enterprise
