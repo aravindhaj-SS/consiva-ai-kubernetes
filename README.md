@@ -95,7 +95,7 @@ port-less alias such as `registry.kind.local`.
 
 ## Published images
 
-Current release is **`1.0.5`** on track **`1.0`**, pushed 2026-10-09 to
+Current release is **`1.0.6`** on track **`1.0`**, pushed 2026-10-09 to
 `gcr.io/consiva-public/consiva-ai-kubernetes`. All six references carry
 `com.googleapis.cloudmarketplace.product.service.name=services/consiva-ai-kubernetes.endpoints.consiva-public.cloud.goog`
 on the **remote** manifest, each confirmed with `docker buildx imagetools inspect --raw`, and each
@@ -103,14 +103,19 @@ tag resolves to a single OCI manifest rather than an index.
 
 | Image | Tags | Digest |
 |---|---|---|
-| `gcr.io/consiva-public/consiva-ai-kubernetes` (backend, **primary**) | `1.0`, `1.0.5` | `sha256:fbc4f3a2760f7b3d3f05b239cbae94a2533e1074e372db53251e409c1685ea07` |
-| `…/consiva-ai-kubernetes/frontend` | `1.0`, `1.0.5` | `sha256:8f3f1f011d5f413f55e348ee099a492b744e4a84b2c30ba0fb1e215e501759c7` |
-| `…/consiva-ai-kubernetes/deployer` | `1.0`, `1.0.5` | `sha256:a2e19fe506d1fd9b8169d65b08af52f58f1aae73d1d5a12543602bc294641d34` |
+| `gcr.io/consiva-public/consiva-ai-kubernetes` (backend, **primary**) | `1.0`, `1.0.6` | `sha256:fbc4f3a2760f7b3d3f05b239cbae94a2533e1074e372db53251e409c1685ea07` |
+| `…/consiva-ai-kubernetes/frontend` | `1.0`, `1.0.6` | `sha256:8f3f1f011d5f413f55e348ee099a492b744e4a84b2c30ba0fb1e215e501759c7` |
+| `…/consiva-ai-kubernetes/deployer` | `1.0`, `1.0.6` | `sha256:23a776703ce855b5aeeb045efcb3424ed8c916b3d98f8e8985e0f05949dfc0c4` |
 
-The frontend digest is unchanged since `1.0.2` — no frontend source has changed since.
+Backend and frontend are byte-identical to `1.0.5`: `1.0.6` changes only the chart and the schema,
+so only the deployer is new.
 
-**`1.0.0` through `1.0.5` are all spent.** Tags are never overwritten; the next rebuild needs
-`1.0.6`. Superseded images remain in the registry and should not be used:
+**Do not publish these with `docker buildx imagetools create`.** Copying a manifest that way wraps
+it in a *new index* and drops the service-name annotation — the exact defect fixed in `1.0.1`. It
+was tried once as a shortcut, caught on verification, and the images were rebuilt and pushed with
+`build-images.sh`. Always publish with the script, and always re-check the annotation afterwards.
+
+**`1.0.0` through `1.0.6` are all spent.** The next rebuild needs `1.0.7`. Superseded images remain in the registry and should not be used:
 
 | Version | Why superseded |
 |---|---|
@@ -119,6 +124,7 @@ The frontend digest is unchanged since `1.0.2` — no frontend source has change
 | `1.0.2` | crash-loops when no database is reachable |
 | `1.0.3` | starts without a database but never converges when one appears |
 | `1.0.4` | ClusterIP Services rejected by GKE Ingress; backend could take longer than the readiness deadline to bind |
+| `1.0.5` | NEG annotation collided with GKE's own NEG custom resource; Ingress creation could exceed the 300s readiness budget |
 
 ### Why 1.0.1 and 1.0.2 exist
 
@@ -304,43 +310,65 @@ few seconds `/health` reported `"healthy"` and `/health/ready` returned 200 on a
 had not yet checked whether it had a database. It now starts **pending** — `"degraded"` with
 `"Startup bootstrap has not finished yet"` and a 503 — and resolves only once the probe answers.
 
-## GKE Ingress: NodePort **and** the NEG annotation
+## GKE Ingress: NodePort only, and the Ingress is opt-in
 
-GKE validation rejected `1.0.4` on all three tested versions (1.35.6, 1.35.8, 1.36.4):
+Two rounds of GKE validation shaped this. Both outcomes are recorded because the first one was
+wrong and the reasoning is worth keeping.
+
+### Round 1 — `1.0.4` rejected: ClusterIP
 
 ```
 Translation failed: invalid ingress spec: service "…-backend" is type "ClusterIP",
 expected "NodePort" or "LoadBalancer" when not using NEGs
 ```
 
-Both Services are now `NodePort` **and** carry `cloud.google.com/neg: '{"ingress": true}'`. Both
-are needed, and the reason is in Google's own documentation
-([GKE Ingress for Application Load Balancers](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/ingress)):
+Fixed by making both Services `NodePort`. `NodePort` is a superset of `ClusterIP`, so the cluster
+IP and in-cluster DNS are unchanged, the apptest suite still resolves the Services by name, and
+non-GKE ingress controllers are unaffected. `service.type` remains a chart value. The cost is a
+port in 30000–32767 on every node per Service; on GKE those are not externally reachable without a
+firewall rule.
 
-> For clusters where NEGs are not the default, it is still strongly recommended to use
-> container-native load balancing, but it must be enabled explicitly on a per-Service basis.
+### Round 2 — `1.0.5` rejected: the NEG annotation was a mistake
 
-GKE auto-enables container-native load balancing — and auto-adds that annotation — only when the
-cluster is VPC-native, is not on a Shared VPC network, does not use GKE Network Policy, and has the
-HttpLoadBalancing add-on enabled. The failure proves Google's verification clusters fail at least
-one of those, so the annotation has to be stated rather than assumed.
+`1.0.5` also added `cloud.google.com/neg: '{"ingress": true}'` to both Services, on the reasoning
+that routes-based clusters need instance groups while VPC-native clusters should be told explicitly
+to use NEGs. GKE 1.35.6 and 1.35.8 then failed with:
 
-The annotation alone is not enough either:
+```
+ProcessServiceFailed  service/…-frontend  error processing service: failed to ensure svc neg cr
+…/k8s1-…-front-8-…/80 for port: servicenetworkendpointgroups.networking.gke.io
+"k8s1-…-front-8-…" already exists
+```
 
-> If you use routes-based clusters with external Ingress, the GKE Ingress controller cannot use
-> container-native load balancing using GCE_VM_IP_PORT NEGs. Instead, the Ingress controller uses
-> unmanaged instance group backends that include all nodes in all node pools.
+**The annotation has been removed.** It was added at the owner's instruction over a recommendation
+of NodePort alone, and that recommendation was the correct one. The namespace was brand new, so
+nothing could have pre-existed: the controller was going to create the NEG custom resource itself,
+and the explicit annotation made it collide with its own. `NodePort` alone is exactly what the
+round-1 error asked for, and it is all that is configured now.
 
-Instance group backends require `NodePort`. Nothing in the error says which case these clusters
-are in, so the chart covers both: GKE uses NEGs where it can and instance groups where it cannot,
-which is how GKE behaves natively — a Service may be `NodePort` and carry a NEG annotation at the
-same time.
+### Round 2 also — the Ingress is now opt-in (`ingress.enabled: false`)
 
-Nothing else is affected. `NodePort` is a superset of `ClusterIP`, so the cluster IP and in-cluster
-DNS are unchanged, the apptest suite still resolves the Services by name, and non-GKE ingress
-controllers are unaffected (they ignore the annotation). `service.type` remains a chart value, so a
-customer can override it. The cost is a port in 30000–32767 on every node per Service; on GKE those
-are not externally reachable without a firewall rule.
+GKE 1.36.4 produced no service error at all, only `wait_for_ready` timing out at 300s. On GKE an
+Ingress provisions an external Application Load Balancer, which commonly takes four to six minutes
+to become healthy — longer than the deployer's 300-second budget, so the deployment is judged
+failed while the load balancer is still coming up.
+
+Nothing in the verification path needs an Ingress: `apptest/chart/templates/tests.yaml` probes the
+Services over in-cluster DNS, and the Application CR does not depend on it. So the chart no longer
+creates one by default.
+
+- `ingress.enabled` defaults to **false** and is exposed in `schema.yaml` as a boolean, so a
+  customer can switch it on from the deploy form.
+- The Application CR only lists `Ingress` under `componentKinds` when one is actually created —
+  otherwise it would advertise a component that does not exist.
+- `appDomainUrl`'s description no longer tells people to "take the Ingress address", since there
+  may not be one.
+
+The app is fully installed either way; only external exposure is deferred. See `USER_GUIDE.md`.
+
+**AWS note, not acted on this round:** the AWS container product does not use this chart, so
+neither change touches it. The GCP-only `NodePort` default and opt-in Ingress have no AWS
+equivalent to update.
 
 ## Ingress: no host rule, deliberately
 

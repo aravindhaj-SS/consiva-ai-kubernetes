@@ -7,10 +7,10 @@
 image:
   backend:
     repository: gcr.io/consiva-public/consiva-ai-kubernetes
-    tag: "1.0.5"
+    tag: "1.0.6"
   frontend:
     repository: gcr.io/consiva-public/consiva-ai-kubernetes/frontend
-    tag: "1.0.5"
+    tag: "1.0.6"
   pullPolicy: IfNotPresent
 
 # Application resource instance name, supplied by the deployer.
@@ -61,6 +61,12 @@ resources:
 # a non-GKE ingress controller is affected. Overridable. See "GKE Ingress" in README.md.
 service:
   type: NodePort
+# OFF by default, deliberately. On GKE an Ingress provisions an external Application Load
+# Balancer, which commonly takes 4-6 minutes to become healthy — longer than the Marketplace
+# deployer's 300-second readiness budget, so the deployment is judged failed before the load
+# balancer finishes. Nothing in the verification path needs it: the tester probes the Services
+# over in-cluster DNS. Turn it on to expose the app externally, or route to the Services with
+# your own ingress controller.
 ingress:
-  enabled: true
+  enabled: false
   className: ""

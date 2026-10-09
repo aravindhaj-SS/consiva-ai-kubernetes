@@ -124,7 +124,7 @@ and `.Values.namespace` directly. Set them to match the release name and namespa
 | `smtp.fromName` | no | `Consiva CMP` | Display name on outbound mail. |
 | `appDomainUrl` | no | `http://localhost` | The `https://` URL this deployment is reached at. Drives verification and password-reset links, the dashboard's CORS allowlist, and the embed snippet. |
 | `enterpriseLicenseKey` | no | empty | Signed Enterprise licence key. Blank means Free tier. |
-| `ingress.enabled` | no | `true` | Set `false` to manage ingress yourself. |
+| `ingress.enabled` | no | **`false`** | Off by default. Set `true` to have the chart create an Ingress — see [Exposing the app](#exposing-the-app). |
 | `ingress.className` | no | empty | Set to your ingress class, e.g. `nginx`. Left empty, the cluster default applies — on GKE that is the GCE ingress controller. |
 | `service.type` | no | `ClusterIP` | Service type for both Services. |
 | `resources.backend` / `resources.frontend` | no | 500m/1Gi and 250m/512Mi requests | Container resource requests. |
@@ -144,11 +144,41 @@ with `appDomainUrl` set.
 
 ## Basic usage
 
-Find the Ingress address:
+### Exposing the app
+
+**The chart does not create an Ingress by default, so the app is not reachable from outside the
+cluster immediately after installing.** Everything is installed and running; only external access
+is deferred.
+
+This is deliberate. On GKE an Ingress provisions an external Application Load Balancer, which
+commonly takes four to six minutes to become healthy — longer than the deployment's readiness
+budget, so creating one during installation can make a perfectly healthy deployment be reported as
+failed.
+
+Pick one of these once the deployment is up:
+
+**Option A — let the chart create one.** Routes `/api`, `/sdk.js` and `/sdk.min.js` to the backend
+and everything else to the frontend:
 
 ```bash
-kubectl get ingress consiva --namespace consiva
+helm upgrade consiva ./chart --namespace consiva --reuse-values --set ingress.enabled=true
+kubectl get ingress consiva --namespace consiva --watch     # ADDRESS appears in a few minutes
 ```
+
+Then set `appDomainUrl` to the address (or the hostname you point at it) and upgrade again.
+
+**Option B — use your own ingress controller or service mesh.** Leave `ingress.enabled=false` and
+route to the two Services yourself. They are ordinary `NodePort` Services:
+`<name>-backend` on port 80 → backend 5000, `<name>-frontend` on port 80 → frontend 3000. Send
+`/api`, `/sdk.js` and `/sdk.min.js` to the backend and everything else to the frontend.
+
+**Option C — port-forward, for a quick look.** Not for production:
+
+```bash
+kubectl port-forward --namespace consiva svc/consiva-frontend 8080:80
+```
+
+### Checking it is running
 
 Check the backend is healthy. `/health` is a plain `200` with no authentication:
 

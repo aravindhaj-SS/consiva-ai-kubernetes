@@ -3,7 +3,7 @@ x-google-marketplace:
   applicationApiVersion: v1beta1
   # Must match the Application CRD's spec.descriptor.version and the image tags produced by
   # build-images.sh.
-  publishedVersion: "1.0.5"
+  publishedVersion: "1.0.6"
   publishedVersionMetadata:
     releaseNote: >-
       Initial Google Cloud Marketplace release (BYOL). Free tier by default; an Enterprise
@@ -64,9 +64,21 @@ properties:
     description: >-
       The full https:// URL this deployment will be reached at. Drives verification and
       password-reset links, the dashboard's CORS allowlist, and the embed snippet you paste
-      into your own websites. If you do not have a hostname yet, deploy once, take the Ingress
-      address, then upgrade the release with this value set.
+      into your own websites. If you do not have a hostname yet, deploy once, obtain an address
+      (see "Create an Ingress" below), then upgrade the release with this value set.
     default: "http://localhost"
+
+  ingress.enabled:
+    type: boolean
+    title: Create an Ingress
+    description: >-
+      Leave OFF unless you want this deployment to create its own Ingress. On GKE an Ingress
+      provisions an external Application Load Balancer, which commonly takes 4-6 minutes to become
+      healthy — longer than the deployment's readiness budget, so switching this on can make an
+      otherwise healthy deployment be reported as failed. The app is fully installed either way;
+      the Services are reachable in-cluster immediately. Turn this on afterwards (or route to the
+      Services with your own ingress controller) to expose the app externally.
+    default: false
 
   db.connectionString:
     type: string
