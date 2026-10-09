@@ -7,10 +7,10 @@
 image:
   backend:
     repository: gcr.io/consiva-public/consiva-ai-kubernetes
-    tag: "1.0.1"
+    tag: "1.0.4"
   frontend:
     repository: gcr.io/consiva-public/consiva-ai-kubernetes/frontend
-    tag: "1.0.1"
+    tag: "1.0.4"
   pullPolicy: IfNotPresent
 
 # Application resource instance name, supplied by the deployer.

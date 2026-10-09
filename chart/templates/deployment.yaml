@@ -36,9 +36,21 @@ spec:
                 name: {{ .Values.name }}-config
             - secretRef:
                 name: {{ .Values.name }}-secret
-          # /health is a plain 200 with no auth. Generous initial delay: the backend creates
-          # its own schema on an empty database and registers Hangfire jobs before it starts
-          # answering, which takes appreciably longer than a warm start.
+          # /health is a plain 200 with no auth, and it stays 200 even when the backend is
+          # running degraded because its database is unreachable. That is deliberate and it is
+          # what these probes want: an unattended Marketplace verification deploys with the
+          # schema's placeholder database default, and a probe that failed there would turn a
+          # correctly built app into a crash loop.
+          #
+          # The trade-off: a deployment whose database never appears stays Ready forever as far
+          # as these probes are concerned. The honest signal is /health/ready, which returns 503
+          # until the schema and seeds are actually in place, plus the "status" field in /health's
+          # own body and a Warning log line repeated on every retry. Point your own monitoring at
+          # /health/ready; these probes stay on /health on purpose.
+          #
+          # Generous initial delay: the backend creates its own schema on an empty database and
+          # registers Hangfire jobs before it starts answering, which takes appreciably longer
+          # than a warm start.
           readinessProbe:
             httpGet: { path: /health, port: 5000 }
             initialDelaySeconds: 30

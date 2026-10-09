@@ -3,13 +3,18 @@ x-google-marketplace:
   applicationApiVersion: v1beta1
   # Must match the Application CRD's spec.descriptor.version and the image tags produced by
   # build-images.sh.
-  publishedVersion: "1.0.1"
+  publishedVersion: "1.0.4"
   publishedVersionMetadata:
     releaseNote: >-
       Initial Google Cloud Marketplace release (BYOL). Free tier by default; an Enterprise
       licence key issued by Consiva unlocks the paid modules for the contract term.
-      (1.0.1 corrects the deployer input schema: the four secret inputs are declared
-      MASKED_FIELD. No application change from 1.0.0.)
+      (1.0.1 corrected the deployer input schema: the secret inputs are declared MASKED_FIELD.
+      1.0.2 forced postcss to >= 8.5.12, resolving CVE-2026-45623. 1.0.3 generates the JWT secret
+      automatically, gives the external database and SMTP inputs non-functional placeholder
+      defaults so the app can be deployed unattended, and lets the backend start and converge in
+      the background when the database is not yet reachable. 1.0.4 fixes the reachability probe
+      so it also converges against a server that does not yet contain the application's
+      database.)
   images:
     # Google rewrites these at deploy time; the keys map to the image.* values the Helm chart
     # consumes. '' (empty key) is the primary image, which Marketplace publishes at the image
@@ -67,29 +72,54 @@ properties:
     type: string
     title: SQL Server connection string
     description: >-
-      REQUIRED. This app does not ship a database — point it at Cloud SQL for SQL Server or
-      your own instance. Must include ;IPAddressPreference=IPv4First (works around a
-      Microsoft.Data.SqlClient fault resolving IPs on Linux containers). Example:
+      REQUIRED for real use. This app does not ship a database — point it at Cloud SQL for SQL
+      Server or your own instance. Must include ;IPAddressPreference=IPv4First (works around a
+      Microsoft.Data.SqlClient fault resolving IPs on Linux containers) and, unless you present a
+      trusted certificate, ;TrustServerCertificate=True. Example:
       Server=10.0.0.5,1433;Database=CookieConsentDB;User Id=consiva;Password=...;TrustServerCertificate=True;Encrypt=True;IPAddressPreference=IPv4First;
+      ------------------------------------------------------------------
+      The default below is a NON-FUNCTIONAL PLACEHOLDER. It exists only so Google's automated
+      verification can deploy this app unattended; it points at nothing. REPLACE IT before any
+      real use — a deployment left on the default runs permanently degraded.
+      ------------------------------------------------------------------
+    default: "Server=127.0.0.1,1433;Database=consiva;User Id=none;Password=none;TrustServerCertificate=True;Encrypt=True;IPAddressPreference=IPv4First;"
     x-google-marketplace:
       type: MASKED_FIELD        # masked in the deploy form; see the note above "properties"
 
   jwt.secret:
     type: string
-    title: JWT signing secret
+    title: JWT Secret Key
     description: >-
-      REQUIRED. Signs this deployment's own session tokens. Use a unique, random value of at
-      least 32 characters; never reuse one across deployments.
+      Signs this deployment's own session tokens. Generated automatically — you do not supply it,
+      and it is unique to this deployment. Rotating it invalidates every existing session, which
+      only forces users to sign in again.
     x-google-marketplace:
-      type: MASKED_FIELD        # masked in the deploy form; see the note above "properties"
+      type: GENERATED_PASSWORD
+      generatedPassword:
+        length: 32
+        includeSymbols: false
+        # base64 MUST be false. It defaults to TRUE, and chart/templates/secret.yaml puts this
+        # value into the Secret's stringData, which Kubernetes base64-encodes itself — leaving
+        # the default on would encode it twice and every token signature would be computed with
+        # the wrong key. The schema docs say exactly this: "If the value is to be encoded in your
+        # Helm template, this property should be set to False."
+        base64: false
 
   smtp.host:
     type: string
     title: SMTP host
     description: >-
-      REQUIRED — the app will not start without working SMTP. Verification codes go to external
-      data principals exercising their DPDP rights, who have no way to recover from a silently
-      dropped message. Microsoft 365, Google Workspace and Amazon SES's SMTP interface all work.
+      REQUIRED for real use. Verification codes go to external data principals exercising their
+      DPDP rights, who have no way to recover from a silently dropped message. Microsoft 365,
+      Google Workspace and Amazon SES's SMTP interface all work.
+      ------------------------------------------------------------------
+      The default below is a NON-FUNCTIONAL PLACEHOLDER. It exists only so Google's automated
+      verification can deploy this app unattended; it points at nothing. REPLACE IT before any
+      real use — a deployment left on the default runs permanently degraded.
+      ------------------------------------------------------------------
+      Mail delivery is never silently dropped: a send against this placeholder fails loudly and
+      is logged as an error.
+    default: "localhost"
   smtp.port:
     type: string
     title: SMTP port
@@ -98,17 +128,26 @@ properties:
   smtp.username:
     type: string
     title: SMTP username
-    description: REQUIRED.
+    description: >-
+      REQUIRED for real use. The default "none" is a non-functional placeholder for automated
+      verification and must be replaced.
+    default: "none"
   smtp.password:
     type: string
     title: SMTP password
-    description: REQUIRED. Stored in a Kubernetes Secret.
+    description: >-
+      REQUIRED for real use. Stored in a Kubernetes Secret. The default "none" is a
+      non-functional placeholder for automated verification and must be replaced.
+    default: "none"
     x-google-marketplace:
       type: MASKED_FIELD        # masked in the deploy form; see the note above "properties"
   smtp.fromEmail:
     type: string
     title: SMTP from address
-    description: REQUIRED. The address outbound mail is sent as.
+    description: >-
+      REQUIRED for real use. The address outbound mail is sent as. The default is a
+      non-functional placeholder for automated verification and must be replaced.
+    default: "no-reply@example.com"
   smtp.fromName:
     type: string
     title: SMTP from name

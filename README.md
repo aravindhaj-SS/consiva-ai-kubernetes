@@ -95,7 +95,7 @@ port-less alias such as `registry.kind.local`.
 
 ## Published images
 
-Current release is **`1.0.1`** on track **`1.0`**, pushed 2026-10-08 to
+Current release is **`1.0.4`** on track **`1.0`**, pushed 2026-10-09 to
 `gcr.io/consiva-public/consiva-ai-kubernetes`. All six references carry
 `com.googleapis.cloudmarketplace.product.service.name=services/consiva-ai-kubernetes.endpoints.consiva-public.cloud.goog`
 on the **remote** manifest, each confirmed with `docker buildx imagetools inspect --raw`, and each
@@ -103,19 +103,31 @@ tag resolves to a single OCI manifest rather than an index.
 
 | Image | Tags | Digest |
 |---|---|---|
-| `gcr.io/consiva-public/consiva-ai-kubernetes` (backend, **primary**) | `1.0`, `1.0.1` | `sha256:da6c113185d6d78767a752466df79292af1eb938aef949c50211ed4982ef0820` |
-| `…/consiva-ai-kubernetes/frontend` | `1.0`, `1.0.1` | `sha256:b096d8de9fcea377915fe639637f2f64d9a8605d36a9bb7746c4757277f9e15a` |
-| `…/consiva-ai-kubernetes/deployer` | `1.0`, `1.0.1` | `sha256:80375b9a1739ab249122f4accf7f68e6ac3df2b259376465e78eab6e41bedc83` |
+| `gcr.io/consiva-public/consiva-ai-kubernetes` (backend, **primary**) | `1.0`, `1.0.4` | `sha256:ad65da0fd63062965a3d0b458360dfb2df61f1f071d69122baa4f9a3ba21b4f1` |
+| `…/consiva-ai-kubernetes/frontend` | `1.0`, `1.0.4` | `sha256:8f3f1f011d5f413f55e348ee099a492b744e4a84b2c30ba0fb1e215e501759c7` |
+| `…/consiva-ai-kubernetes/deployer` | `1.0`, `1.0.4` | `sha256:957173079d2e5069df49fd0b56d622fe23c1f47efc449f34db1410fb6ff9f458` |
 
-The `1.0` track tag now points at the `1.0.1` digests, which is what Marketplace follows to pick
-up patch releases.
+The frontend digest is unchanged from `1.0.2` — no frontend source changed, so the build is
+byte-identical and it simply carries extra tags. Backend and deployer are new.
 
-### Why 1.0.1 exists
+The `1.0` track tag points at the `1.0.4` digests, which is what Marketplace follows to pick up
+patch releases.
 
-Producer Portal rejected the `1.0.0` deployer outright:
+**`1.0.0` through `1.0.4` are all spent.** Tags are never overwritten; the next rebuild needs
+`1.0.5`. Superseded images remain in the registry and should not be used:
+
+| Version | Why superseded |
+|---|---|
+| `1.0.0` | deployer schema unparseable (`sensitive` is not a v2 field) |
+| `1.0.1` | frontend carries postcss CVE-2026-45623 |
+| `1.0.2` | crash-loops when no database is reachable |
+| `1.0.3` | starts without a database but **never converges** when one appears — its reachability probe cannot see a server that does not yet contain the app's database |
+
+### Why 1.0.1 and 1.0.2 exist
+
+**1.0.1 — schema.** Producer Portal rejected the `1.0.0` deployer outright:
 
 ```
-Failed to parse schema from deployer gcr.io/consiva-public/consiva-ai-kubernetes/deployer@sha256:88b48a37…
 Cannot find field: sensitive in message cloud.commerce.common.display.v1.XGoogleMarketplaceProperty
 ```
 
@@ -127,12 +139,31 @@ with was inert as written: `STRING` only does anything alongside a `string:` blo
 The four secret inputs — `db.connectionString`, `jwt.secret`, `smtp.password` and
 `enterpriseLicenseKey` — are now `MASKED_FIELD`. **This does not change how values reach the
 chart.** `config_helper.py` treats `MASKED_FIELD` purely as a UI hint (it only asserts the
-property is a string); no transformation is applied, so the Secret template receives the same
-values under the same names. Verified by re-running mpdev install and verify after the change.
+property is a string); no transformation is applied. Confirmed by reading the rendered Secret
+after an install: the same four keys, with the connection string intact at full length including
+its password and `IPAddressPreference=IPv4First` suffix.
 
-**`1.0.0` and `1.0.1` are both spent**, as is the `1.0` tag's current position. Tags are never
-overwritten; the next rebuild needs `1.0.2`. The `1.0.0` images are still in the registry but its
-deployer is unusable — Producer Portal cannot parse its schema.
+**1.0.2 — CVE-2026-45623 (postcss).** Producer Portal's scan flagged postcss `8.4.31` in the
+frontend image, fixed in `8.5.12`.
+
+The vulnerable copy was **not** the project's own dependency. `package.json` declared postcss as a
+devDependency and the lockfile resolved it to `8.5.28` — fine, and in any case absent from the
+image, since a devDependency does not reach the `.next/standalone` output. The flagged copy was a
+*nested* `node_modules/next/node_modules/postcss` at `8.4.31`, pinned as an exact dependency by
+`next` 15.5.25, which does reach the image because the runtime stage copies `.next/standalone`.
+
+The fix is an npm `overrides` entry forcing `postcss` to `^8.5.12` across the tree. npm rejects an
+override that conflicts with a direct dependency range (`EOVERRIDE`), so the devDependency range
+was raised from `^8.4.49` to `^8.5.12` to match — an explicit floor rather than an implicit one.
+`next` itself was **not** bumped; nothing else in the tree changed.
+
+Result, verified inside the built image rather than the working tree: exactly one postcss package,
+at `8.5.29`, and no nested copy. The frontend still compiles (73/73 static pages) and serves —
+`/` returns 307 to `/login`, and `/login` returns 200 with rendered HTML.
+
+Worth knowing for the future: `next` ships many `postcss-*` packages under
+`next/dist/compiled/`, but there is **no** precompiled bare `postcss` there, so an override does
+reach the only copy that matters. Had there been one, an override would not have touched it.
 
 Carrying *both* the track and version tag on the deployer is correct, not redundant.
 `building-deployer.md` states each image "**must** carry the primary track ID and the specific
@@ -146,6 +177,69 @@ Deployer URL for Producer Portal, **no digest**:
 ```
 gcr.io/consiva-public/consiva-ai-kubernetes/deployer
 ```
+
+## Starting without a database, and the degraded state
+
+Google verifies a Kubernetes app by deploying it unattended with whatever defaults `schema.yaml`
+declares. This product deliberately ships no database, so there is nothing for those defaults to
+point at. Until 1.0.3 the backend crash-looped in that situation and verification failed on an app
+that is in fact correctly built.
+
+From 1.0.3 the backend starts anyway when no database is reachable, and converges on its own once
+one appears. The same thing covers the ordinary Kubernetes race where the app wins the start-up
+race against its own database.
+
+**One question decides which path is taken, and it is the only thing that does:** can a connection
+be opened at all? If yes — the case on every AWS Marketplace deployment, where CloudFormation
+creates the RDS instance alongside the container — everything runs inline exactly as it always
+has, before traffic is served, and a seed that fails against a database that *is* there still
+crashes the process. That behaviour is unchanged. If no, the app degrades instead.
+
+### What distinguishes degraded from healthy
+
+| Signal | Healthy | Degraded |
+|---|---|---|
+| `GET /health` status | 200 | **200 — unchanged** |
+| `GET /health` body | `"status":"healthy"` | `"status":"degraded"`, plus `degradedSince` and `reason` |
+| `GET /health/ready` | 200 | **503**, plus `failedAttempts` and `reason` |
+| Logs | one startup line | `DEGRADED:` at Warning, repeated every 30s |
+
+**The trade-off, stated rather than buried:** `/health` answers 200 forever even if the database
+never appears, so a probe pointed only at `/health` cannot tell a working deployment from a
+permanently broken one. That is the price of letting an unattended verification succeed instead of
+crash-loop. The honest signal is `/health/ready`. The chart's own probes stay on `/health`
+deliberately — a readiness probe on `/health/ready` would stop the pod ever becoming Ready during
+verification, which is the exact failure this change exists to fix. **Point customer monitoring at
+`/health/ready`.**
+
+### What the degraded state actually costs
+
+It is not a working deployment. The schema is not created, the Free plan and RBAC grants are not
+seeded, and no recurring background job is registered. Registration and every permission-gated
+action fail until a database appears. It serves, and it says loudly that it is not usable.
+
+### Three things only the no-database test caught
+
+All three compile cleanly and pass all 373 unit tests. Both mpdev scenarios pass with them
+present, because neither exercises *recovery*.
+
+1. **Hangfire killed startup, not the seeds.** `MigrateAsync` and the `DistributedCache` block were
+   already wrapped in log-and-continue. The fatal call was
+   `RecurringJobManager.AddOrUpdate` — Hangfire's storage *is* the database, so registering a
+   schedule opens a connection and takes a distributed lock.
+2. **The reachability probe could not see a server that lacked the app's database.** Connecting
+   with `Database=CookieConsentDB` against a server that does not yet contain it is refused (SQL
+   Server error 4060), so the probe reported "unreachable" forever and never reached
+   `EnsureCreated` — the very thing that would create it. It now falls back to the login's default
+   database.
+3. **Hangfire's own tables were never installed on the degraded path.** `SqlServerStorage` creates
+   them when first resolved from DI, which happens at startup — with the database down that
+   silently did not happen, and convergence then failed with
+   `Invalid object name 'HangFire.Hash'`. The convergence path now installs that schema explicitly.
+
+Verified end to end on a local cluster: `/health/ready` 503 with no database, SQL Server scaled
+from zero, 503 → 200 within ~30 seconds, **zero container restarts**, and the logs showing
+`Hangfire schema ensured`, `Recurring background jobs registered`, `RECOVERED`.
 
 ## Why the primary image sits at the repository root
 
